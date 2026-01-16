@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Collection Portal</title>
+  <title>Nextree Collection Portal</title>
 
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 
@@ -91,7 +91,7 @@
 
 <body>
 <header>
-  <h3 style="margin:0">Collection Portal</h3>
+  <h3 style="margin:0">NexTree Collection Portal</h3>
   <span id="who" class="badge">Sign-in required</span>
   <span id="today" class="badge"></span>
 
@@ -135,17 +135,11 @@
     <div id="secDays" style="display:none;margin-bottom:10px">
       <label>No. of Days</label>
       <input type="number" id="inpDays" min="1" placeholder="Enter days"/>
-      <div style="font-size:12px;color:var(--muted);margin-top:6px">
-        Note: Follow-up Sunday par nahi ja sakta, aur time 09:30–18:30 ke beech hi hoga.
-      </div>
     </div>
 
     <div id="secNC" style="display:none;margin-bottom:10px">
       <label>Next Follow-up Date & Time</label>
       <input type="datetime-local" id="inpNCDate"/>
-      <div style="font-size:12px;color:var(--muted);margin-top:6px">
-        Allowed: Mon–Sat, time 09:30–18:30 only.
-      </div>
     </div>
 
     <div style="margin-bottom:10px">
@@ -159,12 +153,12 @@
 
 <script>
 /* ---------- CONFIG ---------- */
-const API_URL   = "https://script.google.com/macros/s/AKfycbw-FO289AjIzJfYeX-m7KPpTI3clULFTfduCQGAfz-EyNyghYcn8kNTHnOksEScoOO7/exec";
+const API_URL   = "https://script.google.com/macros/s/AKfycbxptE-iSZx5-QxZpdDFGuQcWDdc8SrgY69uFDR-3_BMEpvOcaDepj_R-iOMR_K1ITEPcw/exec";
 const CLIENT_ID = "360849757137-agopfs0m8rgmcj541ucpg22btep5olt3.apps.googleusercontent.com";
 
 /* Working hours */
-const WORK_START = {h:9, m:30};
-const WORK_END   = {h:18, m:30};
+const WORK_START = {h:10, m:00};
+const WORK_END   = {h:18, m:00};
 
 /* ---------- STATE ---------- */
 let idToken=null, userEmail=null, items=[], selected=null, pendingAction=null, serverNowISO=null;
