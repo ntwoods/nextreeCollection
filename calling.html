@@ -1,0 +1,467 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Collection Portal</title>
+
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+  <style>
+    :root{
+      --bg:#f6f7fb;
+      --card:#fff;
+      --muted:#64748b;
+      --border:#e5e7eb;
+      --blue:#2563eb;
+      --blueSoft:#e8f0ff;
+      --red:#dc2626;
+      --redSoft:#ffe9e9;
+      --shadow:0 6px 18px rgba(15,23,42,.08);
+      --radius:14px;
+    }
+    body{margin:0;background:var(--bg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+    header{
+      display:flex;gap:10px;align-items:center;
+      padding:14px 16px;background:#fff;border-bottom:1px solid var(--border);
+      position:sticky;top:0;z-index:10;
+    }
+    .badge{
+      font-size:12px;padding:6px 10px;border:1px solid var(--border);
+      border-radius:999px;color:#0f172a;background:#fff;
+    }
+    .toolbar{display:flex;gap:8px;align-items:center}
+    .btn{
+      border:1px solid var(--border);
+      background:#fff;border-radius:10px;padding:9px 12px;
+      cursor:pointer;font-weight:600;
+    }
+    .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff;}
+    .btn:disabled{opacity:.6;cursor:not-allowed;}
+    .container{max-width:1100px;margin:16px auto;padding:0 12px;}
+    .panel{
+      background:#fff;border:1px solid var(--border);
+      border-radius:var(--radius);box-shadow:var(--shadow);padding:12px;
+    }
+    .toprow{display:flex;gap:10px;align-items:center;justify-content:space-between;margin-bottom:10px;}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;}
+
+    /* Card types */
+    .chip{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:14px;
+      padding:12px;
+      cursor:pointer;
+      transition:transform .08s ease;
+      position:relative;
+    }
+    .chip:hover{transform:translateY(-2px);}
+    .chip .title{font-weight:800;color:#0f172a;}
+    .chip .meta{font-size:12px;color:var(--muted);margin-top:6px;line-height:1.4;}
+    .chip .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;}
+    .tag{
+      font-size:11px;font-weight:800;
+      border-radius:999px;padding:4px 8px;border:1px solid var(--border);
+      background:#fff;color:#0f172a;
+    }
+    .tag.blue{border-color:#b9d0ff;background:var(--blueSoft);color:#0b2a6b;}
+    .tag.red{border-color:#ffc7c7;background:var(--redSoft);color:#7f1d1d;}
+    .tag.gray{background:#f8fafc;}
+
+    /* Color themes */
+    .fresh{background:#fff;}
+    .auto{border-color:#b9d0ff;background:var(--blueSoft);}
+    .manual{border-color:#c7d2fe;background:#eef2ff;}
+    .overdue{border-color:#ffc7c7;background:var(--redSoft);}
+
+    /* Modal */
+    .back{position:fixed;inset:0;background:rgba(15,23,42,.35);display:none;align-items:center;justify-content:center;padding:14px;}
+    .modal{background:#fff;border-radius:16px;max-width:520px;width:100%;padding:14px;border:1px solid var(--border);box-shadow:var(--shadow);}
+    textarea,input{width:100%;box-sizing:border-box;padding:10px;border:1px solid var(--border);border-radius:10px;font-size:14px;outline:none;}
+    label{font-size:13px;color:var(--muted);display:block;margin-bottom:6px;}
+    .spinner{
+      border:3px solid #e6e6e6;border-top:3px solid var(--blue);
+      border-radius:50%;width:16px;height:16px;animation:spin .8s linear infinite;
+      display:inline-block;margin-right:8px;vertical-align:middle;
+    }
+    @keyframes spin{100%{transform:rotate(360deg)}}
+  </style>
+</head>
+
+<body>
+<header>
+  <h3 style="margin:0">Collection Portal</h3>
+  <span id="who" class="badge">Sign-in required</span>
+  <span id="today" class="badge"></span>
+
+  <div style="margin-left:auto" class="toolbar">
+    <div id="gBtn"></div>
+    <button class="btn" id="btnRefresh">Refresh</button>
+    <button class="btn" id="btnClose">Force Schedule</button>
+  </div>
+</header>
+
+<div class="container">
+  <div class="panel">
+    <div class="toprow">
+      <span class="badge" id="count">0 items</span>
+      <span id="countdown" style="color:var(--muted)"></span>
+    </div>
+
+    <div id="pageLoader" style="display:none;text-align:center;padding:24px">
+      <div class="spinner"></div> Loading...
+    </div>
+
+    <div class="grid" id="grid"></div>
+  </div>
+</div>
+
+<!-- Modal -->
+<div class="back" id="mBack">
+  <div class="modal">
+    <h3 id="mTitle" style="margin:0 0 10px 0">Action</h3>
+
+    <div id="mInfo" class="meta" style="margin-bottom:10px;color:var(--muted)"></div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <button class="btn" id="actDone">Done</button>
+      <button class="btn" id="actWillPay">Will Pay After X Days</button>
+      <button class="btn" id="actNotConn">Not Connected</button>
+      <button class="btn" id="actLedger">Not on Printed Sheet</button>
+      <button class="btn" id="mCancel" style="margin-left:auto">Cancel</button>
+    </div>
+
+    <div id="secDays" style="display:none;margin-bottom:10px">
+      <label>No. of Days</label>
+      <input type="number" id="inpDays" min="1" placeholder="Enter days"/>
+      <div style="font-size:12px;color:var(--muted);margin-top:6px">
+        Note: Follow-up Sunday par nahi ja sakta, aur time 09:30–18:30 ke beech hi hoga.
+      </div>
+    </div>
+
+    <div id="secNC" style="display:none;margin-bottom:10px">
+      <label>Next Follow-up Date & Time</label>
+      <input type="datetime-local" id="inpNCDate"/>
+      <div style="font-size:12px;color:var(--muted);margin-top:6px">
+        Allowed: Mon–Sat, time 09:30–18:30 only.
+      </div>
+    </div>
+
+    <div style="margin-bottom:10px">
+      <label>Remark (optional)</label>
+      <textarea id="inpRemark" rows="3"></textarea>
+    </div>
+
+    <button class="btn primary" style="width:100%" id="submitFinal">Submit</button>
+  </div>
+</div>
+
+<script>
+/* ---------- CONFIG ---------- */
+const API_URL   = "https://script.google.com/macros/s/AKfycbw-FO289AjIzJfYeX-m7KPpTI3clULFTfduCQGAfz-EyNyghYcn8kNTHnOksEScoOO7/exec";
+const CLIENT_ID = "360849757137-agopfs0m8rgmcj541ucpg22btep5olt3.apps.googleusercontent.com";
+
+/* Working hours */
+const WORK_START = {h:9, m:30};
+const WORK_END   = {h:18, m:30};
+
+/* ---------- STATE ---------- */
+let idToken=null, userEmail=null, items=[], selected=null, pendingAction=null, serverNowISO=null;
+let serverNowStartMs=null, clientStartMs=null;
+let tickTimer=null;
+
+/* ---------- INIT ---------- */
+window.onload = () => {
+  google.accounts.id.initialize({ client_id: CLIENT_ID, callback: handleCred });
+  google.accounts.id.renderButton(document.getElementById("gBtn"), { theme:"outline", size:"large" });
+
+  document.getElementById("btnRefresh").onclick = load;
+  document.getElementById("btnClose").onclick   = forceSchedule;
+
+  document.getElementById("today").textContent =
+    new Date().toLocaleDateString("en-IN",{weekday:"short",day:"2-digit",month:"short",year:"numeric"});
+
+  startHeaderCountdown();
+};
+
+/* ---------- LOGIN ---------- */
+function handleCred(resp){
+  idToken = resp.credential;
+  const p = JSON.parse(atob(idToken.split('.')[1]));
+  userEmail = p.email;
+
+  document.getElementById("who").textContent = userEmail;
+  load();
+}
+
+/* ---------- API ---------- */
+async function api(action, payload){
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 30000);
+
+  let r;
+  try{
+    // IMPORTANT:
+    // - headers mat bhejo (esp. Content-Type: application/json)
+    // - warna browser preflight OPTIONS maarega aur Apps Script CORS pe block ho jayega
+    r = await fetch(API_URL, {
+      method: "POST",
+      body: JSON.stringify({ action, idToken, payload }),
+      signal: ctrl.signal
+    });
+  } finally {
+    clearTimeout(t);
+  }
+
+  // If Apps Script ever returns HTML error page, json parse fail hoga
+  const text = await r.text();
+  let j;
+  try{
+    j = JSON.parse(text);
+  } catch(e){
+    throw new Error("Invalid server response (not JSON). Check Apps Script deployment / URL.");
+  }
+
+  if(!j.ok) throw new Error((j.error && (j.error.message || j.error)) || "API error");
+  return j.data;
+}
+
+
+/* ---------- LOAD DASHBOARD ---------- */
+async function load(){
+  showPageLoader(true);
+  const data = await api("getDashboard");
+  items = data.items || [];
+  serverNowISO = data.now || null;
+  if(serverNowISO){ serverNowStartMs = new Date(serverNowISO).getTime(); clientStartMs = Date.now(); }
+  showPageLoader(false);
+  render();
+  startPerCardTick();
+}
+
+/* ---------- FORCE SCHEDULE ---------- */
+async function forceSchedule(){
+  if(!confirm("Run auto scheduling now?")) return;
+  await api("closeOutUser");
+  await load();
+}
+
+/* ---------- UI HELPERS ---------- */
+function showPageLoader(st){
+  document.getElementById("pageLoader").style.display = st ? "block":"none";
+  document.getElementById("grid").style.display = st ? "none":"grid";
+}
+
+function esc(s){
+  return (""+ (s ?? "")).replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));
+}
+function fmtDT(x){
+  const d = new Date(x);
+  return d.toLocaleString("en-IN",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"});
+}
+function mins(h,m){ return h*60+m; }
+function isSunday(d){ return d.getDay()===0; }
+function withinHours(d){
+  const mm = d.getHours()*60 + d.getMinutes();
+  return mm >= mins(WORK_START.h,WORK_START.m) && mm <= mins(WORK_END.h,WORK_END.m);
+}
+function msToHMS(ms){
+  const s = Math.max(0, Math.floor(ms/1000));
+  const h = Math.floor(s/3600);
+  const m = Math.floor((s%3600)/60);
+  const ss= s%60;
+  return `${h}:${String(m).padStart(2,"0")}:${String(ss).padStart(2,"0")}`;
+}
+
+/* ---------- RENDER ---------- */
+function render(){
+  const g = document.getElementById("grid");
+  g.innerHTML = "";
+
+  items.forEach((it,idx)=>{
+    const d = document.createElement("div");
+
+    let cls = "chip ";
+    if(it.colorTag === "FRESH") cls += "fresh";
+    if(it.colorTag === "AUTO") cls += "auto";
+    if(it.colorTag === "MANUAL") cls += "manual";
+    if(it.colorTag === "OVERDUE") cls += "overdue";
+
+    const tags = [];
+    if(it.cardType==="FRESH") tags.push(`<span class="tag gray">FRESH</span>`);
+    if(it.cardType==="FOLLOWUP"){
+      if(it.colorTag==="AUTO") tags.push(`<span class="tag blue">AUTO FOLLOW-UP</span>`);
+      else if(it.colorTag==="MANUAL") tags.push(`<span class="tag blue">FOLLOW-UP</span>`);
+      if(it.colorTag==="OVERDUE") tags.push(`<span class="tag red">OVERDUE</span>`);
+    }
+
+    const dueLine = it.dueDateTime ? `<div class="meta">Due: <b>${fmtDT(it.dueDateTime)}</b></div>` : "";
+    const noteLine = it.note ? `<div class="meta">Remark: <b>${esc(it.note)}</b></div>` : "";
+    const lastLine = (it.lastAction || it.lastRemark)
+      ? `<div class="meta">Last: <b>${esc(it.lastAction||"")}</b> — ${esc(it.lastRemark||"")}</div>`
+      : `<div class="meta">Last: <span style="color:var(--muted)">No history</span></div>`;
+
+    const countdownLine = it.dueDateTime
+      ? `<div class="meta">Countdown: <b data-countdown="${esc(it.dueDateTime)}">--</b></div>`
+      : "";
+
+    d.className = cls;
+    d.innerHTML = `
+      <div class="title">${esc(it.party)}</div>
+      <div class="row">${tags.join("")}</div>
+      ${dueLine}
+      ${countdownLine}
+      ${noteLine}
+      ${lastLine}
+    `;
+
+    d.onclick = ()=> openModal(it,idx);
+    g.appendChild(d);
+  });
+
+  document.getElementById("count").textContent = items.length+" items";
+}
+
+/* ---------- PER-CARD COUNTDOWN TICK ---------- */
+function startPerCardTick(){
+  if(tickTimer) clearInterval(tickTimer);
+  tickTimer = setInterval(()=>{
+    // Use server clock baseline to avoid missing due-items due to client clock mismatch
+    const nowMs = (serverNowStartMs && clientStartMs) ? (serverNowStartMs + (Date.now()-clientStartMs)) : Date.now();
+    const now = new Date(nowMs);
+    document.querySelectorAll("[data-countdown]").forEach(el=>{
+      const iso = el.getAttribute("data-countdown");
+      const due = new Date(iso);
+      const ms = due - now;
+      el.textContent = msToHMS(ms);
+    });
+  }, 1000);
+}
+
+/* ---------- HEADER COUNTDOWN (to 19:30) ---------- */
+function startHeaderCountdown(){
+  const el = document.getElementById("countdown");
+  function tick(){
+    const now=new Date();
+    const tgt=new Date();
+    tgt.setHours(19,30,0,0);
+    if(now>tgt){ el.textContent="Auto scheduling completed"; return; }
+    el.textContent = `Auto schedule in ${msToHMS(tgt-now)}`;
+    setTimeout(tick,1000);
+  }
+  tick();
+}
+
+/* ---------- MODAL ---------- */
+function openModal(it,idx){
+  selected = {it,idx};
+  pendingAction = null;
+
+  ["actDone","actWillPay","actNotConn","actLedger"].forEach(id=>{
+    document.getElementById(id).classList.remove("primary");
+  });
+
+  document.getElementById("secDays").style.display="none";
+  document.getElementById("secNC").style.display="none";
+
+  document.getElementById("inpRemark").value = it.note ? it.note : "";
+  document.getElementById("inpDays").value="";
+  document.getElementById("inpNCDate").value="";
+
+  document.getElementById("mTitle").textContent = it.party;
+
+  const info = [];
+  if(it.dueDateTime) info.push(`Due: ${fmtDT(it.dueDateTime)}`);
+  if(it.lastAction || it.lastRemark) info.push(`Last: ${it.lastAction||""} — ${it.lastRemark||""}`);
+  document.getElementById("mInfo").textContent = info.join(" | ");
+
+  document.getElementById("mBack").style.display="flex";
+
+  document.getElementById("actDone").onclick      = ()=> choose("Done");
+  document.getElementById("actWillPay").onclick   = ()=> choose("WillPay");
+  document.getElementById("actNotConn").onclick   = ()=> choose("NotConnected");
+  document.getElementById("actLedger").onclick    = ()=> choose("NotOnPrintedSheet");
+  document.getElementById("mCancel").onclick      = closeModal;
+  document.getElementById("submitFinal").onclick  = submitFinal;
+}
+
+function choose(action){
+  pendingAction = action;
+
+  ["actDone","actWillPay","actNotConn","actLedger"].forEach(id=>{
+    document.getElementById(id).classList.remove("primary");
+  });
+
+  if(action==="Done") document.getElementById("actDone").classList.add("primary");
+  if(action==="WillPay") document.getElementById("actWillPay").classList.add("primary");
+  if(action==="NotConnected") document.getElementById("actNotConn").classList.add("primary");
+  if(action==="NotOnPrintedSheet") document.getElementById("actLedger").classList.add("primary");
+
+  document.getElementById("secDays").style.display = (action==="WillPay" ? "block":"none");
+  document.getElementById("secNC").style.display   = (action==="NotConnected" ? "block":"none");
+}
+
+function closeModal(){
+  document.getElementById("mBack").style.display="none";
+}
+
+/* ---------- VALIDATION: NotConnected datetime ---------- */
+function validateNotConnected(dtStr){
+  const d = new Date(dtStr);
+  if(isNaN(d.getTime())) return "Select valid next follow-up date & time!";
+  if(isSunday(d)) return "Follow-up date cannot be Sunday.";
+  if(!withinHours(d)) return "Follow-up time must be between 09:30 and 18:30.";
+  return null;
+}
+
+/* ---------- SUBMIT ---------- */
+async function submitFinal(){
+  if(!pendingAction) return alert("Please select any action.");
+
+  const btn = document.getElementById("submitFinal");
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span>Processing...`;
+
+  try{
+    const it = selected.it;
+
+    let payload = {
+      source  : it.source || "",
+      rowIndex: it.rowIndex || null,
+      party   : it.party,
+      action  : pendingAction,
+      remark  : document.getElementById("inpRemark").value.trim()
+    };
+
+    if(pendingAction==="WillPay"){
+      const d = Number(document.getElementById("inpDays").value);
+      if(!d || d<1) throw new Error("Enter valid days!");
+      payload.days = d;
+    }
+
+    if(pendingAction==="NotConnected"){
+      const dt = document.getElementById("inpNCDate").value;
+      const err = validateNotConnected(dt);
+      if(err) throw new Error(err);
+      payload.nextDateTime = dt;
+    }
+
+    await api("markAction",payload);
+
+    // UI remove immediately for all actions (followup will appear when due time comes)
+    items.splice(selected.idx,1);
+    render();
+    closeModal();
+
+  }catch(e){
+    alert(String(e.message || e));
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = "Submit";
+  }
+}
+</script>
+
+</body>
+</html>

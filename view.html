@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Logs Portal</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <div class="logo">NTW</div>
+      <div class="brand-text">
+        <div class="title">Logs Portal</div>
+        <div class="subtitle">Calls & Follow-ups — sortable + filterable</div>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <button id="btnRefresh" class="btn btn-primary" type="button">Refresh</button>
+      <button id="btnReset" class="btn" type="button">Reset Filters</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="panel">
+      <div class="panel-row">
+        <div class="field">
+          <label>Search</label>
+          <input id="q" class="input" placeholder="Party / Notes / Called By..." />
+        </div>
+
+        <div class="field">
+          <label>Called By (CRM)</label>
+          <select id="crm" class="input"></select>
+        </div>
+
+        <div class="field">
+          <label>Party</label>
+          <select id="party" class="input"></select>
+        </div>
+      </div>
+
+      <div class="panel-row">
+        <div class="field">
+          <label>Called At (From)</label>
+          <input id="calledFrom" class="input" placeholder="dd-mm-yy hh:mm" />
+          <div class="hint">Example: 27-12-25 09:30</div>
+        </div>
+
+        <div class="field">
+          <label>Called At (To)</label>
+          <input id="calledTo" class="input" placeholder="dd-mm-yy hh:mm" />
+          <div class="hint">Example: 27-12-25 18:30</div>
+        </div>
+
+        <div class="field">
+          <label>Next Follow Up (On/From)</label>
+          <input id="fuFrom" class="input" placeholder="dd-mm-yy hh:mm" />
+          <div class="hint">Blank allowed</div>
+        </div>
+
+        <div class="field">
+          <label>Next Follow Up (To)</label>
+          <input id="fuTo" class="input" placeholder="dd-mm-yy hh:mm" />
+          <div class="hint">Blank allowed</div>
+        </div>
+      </div>
+
+      <div class="panel-row panel-row-compact">
+        <div class="chips">
+          <button class="chip" id="chipToday" type="button">Today</button>
+          <button class="chip" id="chipThisWeek" type="button">This Week</button>
+          <button class="chip" id="chipThisMonth" type="button">This Month</button>
+        </div>
+
+        <div class="right">
+          <div id="status" class="status">Ready</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="table-wrap">
+      <div class="table-top">
+        <div class="meta">
+          <span id="countBadge" class="badge">0 rows</span>
+          <span id="sortBadge" class="badge badge-muted">Sort: Called At ↓</span>
+        </div>
+        <div class="table-actions">
+          <button id="btnExport" class="btn" type="button">Export CSV</button>
+        </div>
+      </div>
+
+      <div class="table-scroll">
+        <table id="tbl" class="table">
+          <thead>
+            <tr>
+              <th data-key="calledAtMs" class="sortable">
+                Called At <span class="sort-ind" aria-hidden="true"></span>
+              </th>
+              <th data-key="calledBy" class="sortable">
+                Called By <span class="sort-ind" aria-hidden="true"></span>
+              </th>
+              <th data-key="party" class="sortable">
+                Party <span class="sort-ind" aria-hidden="true"></span>
+              </th>
+              <th data-key="notes" class="sortable">
+                Notes <span class="sort-ind" aria-hidden="true"></span>
+              </th>
+              <th data-key="nextFollowUpMs" class="sortable">
+                Next Follow Up <span class="sort-ind" aria-hidden="true"></span>
+              </th>
+            </tr>
+          </thead>
+          <tbody id="tbody">
+            <tr><td colspan="5" class="empty">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div>Dates shown in <b>dd-mm-yy hh:mm</b> (Asia/Kolkata)</div>
+      <div class="muted">Tip: click any header to toggle ascending/descending sort.</div>
+    </footer>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
