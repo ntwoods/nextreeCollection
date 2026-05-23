@@ -1,0 +1,758 @@
+/************** CONFIG **************/
+const CFG = {
+  SPREADSHEET_ID: '1t1mFKYfme2U5BcMgwkOqxzkLoswGKfTRads5ZNM6df8',
+  SHEETS: { PASTE: 'Paste_Here', LOGS: 'Logs', FOLLOW: 'FollowUp' },
+  CLIENT_ID: '360849757137-agopfs0m8rgmcj541ucpg22btep5olt3.apps.googleusercontent.com',
+  TZ: 'Asia/Kolkata',
+
+  // Working hours (IST)
+  WORK_START_H: 9, WORK_START_M: 30,  // 09:30
+  WORK_END_H: 18, WORK_END_M: 30,     // 18:30
+
+  // Auto scheduler
+  TRIGGER_H: 19, TRIGGER_M: 30,       // 19:30 (7:30 PM)
+  AUTO_DUE_H: 18, AUTO_DUE_M: 30      // next working day 18:30
+};
+
+/************** UTIL **************/
+const _ss = () => SpreadsheetApp.openById(CFG.SPREADSHEET_ID);
+function getSheet_(n){ return _ss().getSheetByName(n) || _ss().insertSheet(n); }
+
+function nowIST_(){
+  // stable IST datetime object
+  return new Date(Utilities.formatDate(new Date(), CFG.TZ, "yyyy-MM-dd'T'HH:mm:ss"));
+}
+
+function todayStartIST_(){
+  return new Date(Utilities.formatDate(new Date(), CFG.TZ, "yyyy-MM-dd'T'00:00:00"));
+}
+function todayEndIST_(){
+  return new Date(Utilities.formatDate(new Date(), CFG.TZ, "yyyy-MM-dd'T'23:59:59"));
+}
+
+function dateAtIST_(y, m, d, hh, mm, ss){
+  // y,m = 1-based month
+  const dt = new Date(y, (m-1), d, hh||0, mm||0, ss||0, 0);
+  return dt;
+}
+
+function isSunday_(d){
+  const D = (d instanceof Date) ? d : new Date(d);
+  return D.getDay() === 0;
+}
+
+function withinWorkHours_(d){
+  const D = (d instanceof Date) ? d : new Date(d);
+  const mins = D.getHours()*60 + D.getMinutes();
+  const start = CFG.WORK_START_H*60 + CFG.WORK_START_M;
+  const end   = CFG.WORK_END_H*60 + CFG.WORK_END_M;
+  return mins >= start && mins <= end;
+}
+
+function clampToWorkHours_(d){
+  const D = new Date(d);
+  const mins = D.getHours()*60 + D.getMinutes();
+  const start = CFG.WORK_START_H*60 + CFG.WORK_START_M;
+  const end   = CFG.WORK_END_H*60 + CFG.WORK_END_M;
+
+  if (mins < start){ D.setHours(CFG.WORK_START_H, CFG.WORK_START_M, 0, 0); }
+  if (mins > end){   D.setHours(CFG.WORK_END_H,   CFG.WORK_END_M,   0, 0); }
+  return D;
+}
+
+function nextWorkingDayAt_(base, hh, mm){
+  // next day at hh:mm, skip Sundays
+  const b = base ? new Date(base) : nowIST_();
+  const d = new Date(b);
+  d.setDate(d.getDate() + 1);
+  while (d.getDay() === 0) d.setDate(d.getDate() + 1);
+  d.setHours(hh, mm, 0, 0);
+  return d;
+}
+
+function normalizeFollowUpDT_(dt){
+  // Rule: no Sunday, time must be within working hours (clamp)
+  let D = new Date(dt);
+  D = clampToWorkHours_(D);
+
+  // if Sunday -> shift to Monday same clamped time
+  while (isSunday_(D)) {
+    D.setDate(D.getDate() + 1);
+  }
+  // after shifting also ensure clamp again
+  D = clampToWorkHours_(D);
+  return D;
+}
+
+function assertValidManualFollowUpDT_(dt){
+  // Manual selection can't be Sunday and can't be outside work hours
+  const D = new Date(dt);
+  if (isSunday_(D)) throw new Error("Follow-up date cannot be Sunday.");
+  if (!withinWorkHours_(D)) throw new Error("Follow-up time must be between 09:30 AM and 06:30 PM.");
+  return D;
+}
+
+function parseDateTimeLocal_(s){
+  // expects "YYYY-MM-DDTHH:mm" from datetime-local
+  if (!s) return null;
+  const t = String(s).trim();
+  const [datePart, timePart] = t.split('T');
+  if (!datePart || !timePart) return new Date(t);
+
+  const [Y,M,D] = datePart.split('-').map(n=>parseInt(n,10));
+  const [hh,mm] = timePart.split(':').map(n=>parseInt(n,10));
+  return dateAtIST_(Y,M,D,hh,mm,0);
+}
+
+
+function parseDMYDateTime_(v){
+  // Accepts Date OR string like "27/12/2025 13:22:00" or "27/12/2025 13:22"
+  if (v instanceof Date) return v;
+  if (v === null || v === undefined) return null;
+
+  const s = String(v).trim();
+  if (!s) return null;
+
+  // Try ISO first
+  const isoTry = new Date(s);
+  if (!isNaN(isoTry.getTime())) return isoTry;
+
+  // dd/MM/yyyy [HH:mm[:ss]]
+  const parts = s.split(' ');
+  const dPart = parts[0] || "";
+  const tPart = parts[1] || "00:00:00";
+
+  const dBits = dPart.split('/');
+  if (dBits.length !== 3) return null;
+  const dd = parseInt(dBits[0],10);
+  const mm = parseInt(dBits[1],10);
+  const yy = parseInt(dBits[2],10);
+  if (!yy || !mm || !dd) return null;
+
+  const tBits = tPart.split(':');
+  const hh = parseInt(tBits[0]||"0",10);
+  const mi = parseInt(tBits[1]||"0",10);
+  const ss = parseInt(tBits[2]||"0",10);
+
+  const dt = dateAtIST_(yy, mm, dd, hh, mi, ss);
+  if (isNaN(dt.getTime())) return null;
+  return dt;
+}
+
+
+
+function readTable_(sh){
+  const vals = sh.getDataRange().getValues();
+  if (!vals.length) return {headers:[], rows:[]};
+  const headers = vals.shift().map(String);
+  const rows = vals.map((r,i)=>{
+    const obj = {_rowIndex: i+2};
+    headers.forEach((h,idx)=>obj[h]=r[idx]);
+    return obj;
+  });
+  return {headers, rows};
+}
+
+function ensureHeadersExact_(sh, headers){
+  if (sh.getLastRow() === 0){
+    sh.appendRow(headers);
+    return headers;
+  }
+  const existing = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(String);
+  // add missing to right
+  headers.forEach(h=>{
+    if (!existing.includes(h)){
+      sh.getRange(1, sh.getLastColumn()+1).setValue(h);
+      existing.push(h);
+    }
+  });
+  return existing;
+}
+
+function appendRowByHeaders_(sh, headers, obj){
+  const row = headers.map(h => (h in obj ? obj[h] : ''));
+  sh.appendRow(row);
+}
+
+function portalDate_(v){
+  if (v === null || v === undefined || v === '') return { text:'', ms:null };
+  const d = (v instanceof Date) ? v : parseDMYDateTime_(v);
+  if (!d || isNaN(d.getTime())) return { text:String(v), ms:null };
+  return {
+    text: Utilities.formatDate(d, CFG.TZ, "dd-MM-yy HH:mm"),
+    ms: d.getTime()
+  };
+}
+
+function getLogsList_(){
+  const out = [];
+
+  const logs = readTable_(getSheet_(CFG.SHEETS.LOGS));
+  (logs.rows || []).forEach(r => {
+    const calledAt = portalDate_(r["Timestamp"]);
+    const nextFollowUp = portalDate_(r["FollowUp DateTime"]);
+    const party = String(r["Party"] || "").trim();
+    const calledBy = String(r["User"] || "").trim();
+    const notes = String(r["Note"] || "");
+    if (!party && !calledBy && !notes) return;
+
+    out.push({
+      source: String(r["Source"] || "Logs"),
+      action: String(r["Action"] || ""),
+      calledAt: calledAt.text,
+      calledAtMs: calledAt.ms,
+      calledBy,
+      party,
+      notes,
+      nextFollowUp: nextFollowUp.text,
+      nextFollowUpMs: nextFollowUp.ms,
+      rowIndex: r._rowIndex
+    });
+  });
+
+  const follow = readTable_(getSheet_(CFG.SHEETS.FOLLOW));
+  (follow.rows || []).forEach(r => {
+    const calledAt = portalDate_(r["Created At"]);
+    const nextFollowUp = portalDate_(r["Due DateTime"] || r["Due Date"]);
+    const party = String(r["Party"] || "").trim();
+    const calledBy = String(r["Caller Email"] || "").trim();
+    const notes = String(r["Note"] || "");
+    if (!party && !calledBy && !notes) return;
+
+    const rawStatus = String(r["Status"] || "").trim();
+    out.push({
+      source: "FollowUp",
+      action: rawStatus ? "Settled" : String(r["Created By"] || r["FU Type"] || "Pending"),
+      calledAt: calledAt.text,
+      calledAtMs: calledAt.ms,
+      calledBy,
+      party,
+      notes,
+      nextFollowUp: nextFollowUp.text,
+      nextFollowUpMs: nextFollowUp.ms,
+      rowIndex: r._rowIndex
+    });
+  });
+
+  out.sort((a,b) => (b.calledAtMs || 0) - (a.calledAtMs || 0));
+  return out;
+}
+
+/************** AUTH **************/
+function verifyIdToken_(idToken){
+  if(!idToken) throw new Error('Missing idToken');
+  const res = UrlFetchApp.fetch(
+    'https://oauth2.googleapis.com/tokeninfo?id_token='+encodeURIComponent(idToken),
+    {muteHttpExceptions:true}
+  );
+  if(res.getResponseCode() !== 200) throw new Error('Invalid token');
+  const p = JSON.parse(res.getContentText());
+  if(p.aud !== CFG.CLIENT_ID) throw new Error('aud mismatch');
+  if(!(p.email_verified === true || p.email_verified === 'true')) throw new Error('email not verified');
+  return { email: p.email, name: p.name || '' };
+}
+
+/************** SCHEMA **************/
+function ensureLogHeaders_(){
+  const sh = getSheet_(CFG.SHEETS.LOGS);
+  return ensureHeadersExact_(sh, [
+    "Timestamp","User","Party","Source","Action","Note","FollowUp DateTime","DaysPromised"
+  ]);
+}
+function ensureFollowupHeaders_(){
+  const sh = getSheet_(CFG.SHEETS.FOLLOW);
+  return ensureHeadersExact_(sh, [
+    "Caller Email","Party","Due DateTime","Status","Created At","Note","FU Type","Created By"
+  ]);
+}
+
+/************** BUSINESS HELPERS **************/
+function getLastRemarkMap_(lowerEmail){
+  const logSh = getSheet_(CFG.SHEETS.LOGS);
+  const logs = readTable_(logSh);
+  const map = {}; // party -> {action,note,ts}
+  (logs.rows||[])
+    .filter(r => String(r["User"]||"").trim().toLowerCase() === lowerEmail)
+    .forEach(r=>{
+      const party = String(r["Party"]||"").trim();
+      if(!party) return;
+      const ts = r["Timestamp"];
+      const d = (ts instanceof Date) ? ts : new Date(ts);
+      const cur = map[party];
+      if(!cur || d > cur.ts){
+        map[party] = {
+          ts: d,
+          action: String(r["Action"]||""),
+          note: String(r["Note"]||"")
+        };
+      }
+    });
+  return map;
+}
+
+function hasLogToday_(lowerEmail, party){
+  const logSh = getSheet_(CFG.SHEETS.LOGS);
+  const logs = readTable_(logSh);
+  const tStart = todayStartIST_();
+  const tEnd   = todayEndIST_();
+  const pStr = String(party||"").trim();
+
+  return (logs.rows||[]).some(r=>{
+    const usr = String(r["User"]||"").trim().toLowerCase();
+    const prt = String(r["Party"]||"").trim();
+    const ts  = r["Timestamp"];
+    const d   = (ts instanceof Date) ? ts : new Date(ts);
+    return usr===lowerEmail && prt===pStr && d>=tStart && d<=tEnd;
+  });
+}
+
+function getUnsettledFUForParty_(fuRows, lowerEmail, party){
+  const p = String(party||"").trim();
+  return (fuRows||[])
+    .filter(r => String(r["Caller Email"]||"").trim().toLowerCase() === lowerEmail)
+    .filter(r => String(r["Party"]||"").trim() === p)
+    .filter(r => !String(r["Status"]||"").trim()); // unsettled only
+}
+
+function settleAllUnsettledFU_(email, party){
+  const fuSh = getSheet_(CFG.SHEETS.FOLLOW);
+  const fuHeaders = ensureFollowupHeaders_();
+  const fu = readTable_(fuSh);
+  const lower = String(email||"").trim().toLowerCase();
+  const p = String(party||"").trim();
+  const now = nowIST_();
+
+  const statusCol = fuHeaders.indexOf("Status")+1;
+  if(statusCol < 1) return 0;
+
+  let count = 0;
+  (fu.rows||[])
+    .filter(r => String(r["Caller Email"]||"").trim().toLowerCase() === lower)
+    .filter(r => String(r["Party"]||"").trim() === p)
+    .filter(r => !String(r["Status"]||"").trim())
+    .forEach(r=>{
+      fuSh.getRange(r._rowIndex, statusCol).setValue(now);
+      count++;
+    });
+  return count;
+}
+
+function appendLog_(obj){
+  const sh = getSheet_(CFG.SHEETS.LOGS);
+  const headers = ensureLogHeaders_();
+  appendRowByHeaders_(sh, headers, obj);
+}
+
+function appendFollowUp_(obj){
+  const sh = getSheet_(CFG.SHEETS.FOLLOW);
+  const headers = ensureFollowupHeaders_();
+  appendRowByHeaders_(sh, headers, obj);
+}
+
+/************** DASHBOARD **************/
+function getDashboard_(email){
+  const lower = String(email).trim().toLowerCase();
+  const now = nowIST_();
+  const tStart = todayStartIST_();
+  const tEnd   = todayEndIST_();
+
+
+  const paste = readTable_(getSheet_(CFG.SHEETS.PASTE));
+  const fuSh = getSheet_(CFG.SHEETS.FOLLOW);
+  ensureFollowupHeaders_();
+  const fu = readTable_(fuSh);
+
+  const lastRemarkMap = getLastRemarkMap_(lower);
+
+  // Build a set of parties to evaluate:
+// 1) Parties assigned in Paste_Here for this caller
+// 2) Parties that have any UNSETTLED follow-up for this caller (even if not in Paste_Here due to dedupe/cleanup)
+const assignedParties = new Set();
+
+// from Paste_Here
+(paste.rows||[])
+  .filter(r => String(r["Calling Person"]||"").trim().toLowerCase() === lower)
+  .map(r => String(r["Particulars"]||"").trim())
+  .filter(Boolean)
+  .forEach(p => assignedParties.add(p));
+
+// from FollowUp (unsettled)
+(fu.rows||[])
+  .filter(r => String(r["Caller Email"]||"").trim().toLowerCase() === lower)
+  .filter(r => !String(r["Status"]||"").trim())
+  .map(r => String(r["Party"]||"").trim())
+  .filter(Boolean)
+  .forEach(p => assignedParties.add(p));
+// For each party, decide card
+  const items = [];
+  assignedParties.forEach(party=>{
+    // Rule: if any unsettled FU exists:
+    const fuList = getUnsettledFUForParty_(fu.rows, lower, party).map(r=>{
+      const dd = r["Due DateTime"];
+      const d = (dd instanceof Date) ? dd : parseDMYDateTime_(dd);
+      return {...r, _due: d};
+    }).sort((a,b)=>a._due - b._due);
+
+    if (fuList.length){
+      const earliest = fuList[0];
+
+      // If due time has come -> show followup card
+      // Show if overdue OR due anytime today (even if time is in future today)
+      // If overdue OR due anytime today -> show followup card
+      // Show if overdue OR due anytime today (even if time is in future today)
+// If due datetime is invalid/unparseable, still show it (so user never misses unsettled follow-ups)
+if (!earliest._due || isNaN(earliest._due.getTime()) || earliest._due <= tEnd){
+        const overdue = earliest._due < now;
+        const fuType = String(earliest["FU Type"]||"").trim().toUpperCase();
+
+        items.push({
+          party,
+          cardType: "FOLLOWUP",
+          colorTag: overdue ? "OVERDUE" : (fuType==="AUTO" ? "AUTO" : "MANUAL"),
+          source: "FollowUp",
+          rowIndex: earliest._rowIndex,
+          dueDateTime: (earliest._due && !isNaN(earliest._due.getTime())) ? earliest._due.toISOString() : "",
+          note: String(earliest["Note"]||""),
+          lastAction: lastRemarkMap[party]?.action || "",
+          lastRemark: lastRemarkMap[party]?.note || ""
+        });
+        return;
+      }
+
+
+      // Otherwise future unsettled followup exists => hide fresh
+      return;
+    }
+
+    // No unsettled FU exists => can show fresh only if no log today
+    if (!hasLogToday_(lower, party)){
+      items.push({
+        party,
+        cardType: "FRESH",
+        colorTag: "FRESH",
+        source: "Paste_Here",
+        rowIndex: null,
+        dueDateTime: null,
+        note: "",
+        lastAction: lastRemarkMap[party]?.action || "",
+        lastRemark: lastRemarkMap[party]?.note || ""
+      });
+    }
+  });
+
+  // sort: overdue first, then followups, then fresh
+  const pr = (x)=>{
+    if(x.colorTag==="OVERDUE") return 0;
+    if(x.cardType==="FOLLOWUP") return 1;
+    return 2;
+  };
+  items.sort((a,b)=> pr(a)-pr(b) || String(a.party).localeCompare(String(b.party)));
+
+  return { email, now: now.toISOString(), items };
+}
+
+/************** ACTIONS **************/
+function markAction_(email, payload){
+  const lock = LockService.getScriptLock();
+  lock.waitLock(25000);
+
+  try{
+    const now = nowIST_();
+    const p = payload || {};
+    const party = String(p.party||"").trim();
+    const action = String(p.action||"").trim();
+    const remark = String(p.remark||"").trim();
+    const source = String(p.source||"").trim() || "UI";
+
+    if(!party) throw new Error("Missing party");
+    if(!action) throw new Error("Missing action");
+
+    // ✅ Settle ANY existing unsettled followups for this user+party (as you required)
+    settleAllUnsettledFU_(email, party);
+
+    // Prepare log base
+    const baseLog = {
+      "Timestamp": now,
+      "User": email,
+      "Party": party,
+      "Source": source,
+      "Action": action,
+      "Note": remark,
+      "FollowUp DateTime": "",
+      "DaysPromised": ""
+    };
+
+    // DONE
+    if(action === "Done"){
+      appendLog_(baseLog);
+      return { ok:true };
+    }
+
+    // NOT ON PRINTED SHEET
+    // Keep LedgerRequired as a legacy alias for older deployed clients.
+    if(action === "NotOnPrintedSheet" || action === "LedgerRequired"){
+      appendLog_({
+        ...baseLog,
+        "Action": "NotOnPrintedSheet"
+      });
+      return { ok:true };
+    }
+
+    // WILL PAY after X days (same call time, normalized)
+    if(action === "WillPay"){
+      const days = Number(p.days);
+      if(!days || days < 1) throw new Error("Invalid days");
+
+      let dt = new Date(now);
+      dt.setDate(dt.getDate() + days);
+
+      // Keep same HH:mm of now, but normalize for Sunday & working hours
+      dt = normalizeFollowUpDT_(dt);
+
+      appendFollowUp_({
+        "Caller Email": email,
+        "Party": party,
+        "Due DateTime": dt,
+        "Status": "",
+        "Created At": now,
+        "Note": remark,
+        "FU Type": "MANUAL",
+        "Created By": "WillPay"
+      });
+
+      appendLog_({
+        ...baseLog,
+        "Action": "WillPay",
+        "FollowUp DateTime": dt,
+        "DaysPromised": days
+      });
+
+      return { ok:true };
+    }
+
+    // NOT CONNECTED -> user-selected datetime, must be within hours & not Sunday
+    if(action === "NotConnected"){
+      const raw = p.nextDateTime;
+      const dt0 = parseDateTimeLocal_(raw);
+      if(!dt0) throw new Error("Missing follow-up date & time");
+
+      const dt = assertValidManualFollowUpDT_(dt0);
+
+      appendFollowUp_({
+        "Caller Email": email,
+        "Party": party,
+        "Due DateTime": dt,
+        "Status": "",
+        "Created At": now,
+        "Note": remark,
+        "FU Type": "MANUAL",
+        "Created By": "NotConnected"
+      });
+
+      appendLog_({
+        ...baseLog,
+        "Action": "NotConnected",
+        "FollowUp DateTime": dt
+      });
+
+      return { ok:true };
+    }
+
+    throw new Error("Invalid action");
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/************** AUTO SCHEDULER (7:30 PM) **************/
+function scheduleForUser_(email){
+  const lower = String(email).trim().toLowerCase();
+  const now = nowIST_();
+  const tStart = todayStartIST_();
+  const tEnd   = todayEndIST_();
+
+  const paste = readTable_(getSheet_(CFG.SHEETS.PASTE));
+  const fuSh = getSheet_(CFG.SHEETS.FOLLOW);
+  ensureFollowupHeaders_();
+  const fu = readTable_(fuSh);
+
+  // next working day 18:30, no Sunday
+  const target = normalizeFollowUpDT_( nextWorkingDayAt_(now, CFG.AUTO_DUE_H, CFG.AUTO_DUE_M) );
+
+  // helper: any unsettled FU exists for party
+  const hasAnyUnsettledFU = (party) => {
+    return getUnsettledFUForParty_(fu.rows, lower, party).length > 0;
+  };
+
+  // helper: has log today
+  const hasLogToday = (party) => hasLogToday_(lower, party);
+
+  // 1) Reschedule "today due" unsettled followups => move to target
+  const dueCol = ensureFollowupHeaders_().indexOf("Due DateTime")+1;
+  const noteCol = ensureFollowupHeaders_().indexOf("Note")+1;
+  const typeCol = ensureFollowupHeaders_().indexOf("FU Type")+1;
+  const createdByCol = ensureFollowupHeaders_().indexOf("Created By")+1;
+
+  (fu.rows||[])
+    .filter(r => String(r["Caller Email"]||"").trim().toLowerCase() === lower)
+    .filter(r => !String(r["Status"]||"").trim())
+    .forEach(r=>{
+      const dd = r["Due DateTime"];
+      if(!dd) return;
+      const d = (dd instanceof Date) ? dd : parseDMYDateTime_(dd);
+
+      // only those due today (any time today)
+      if(d >= tStart && d <= tEnd){
+        fuSh.getRange(r._rowIndex, dueCol).setValue(target);
+        if(noteCol>0){
+          fuSh.getRange(r._rowIndex, noteCol).setValue((String(r["Note"]||"")||"") + " | Auto-rescheduled @19:30");
+        }
+        if(typeCol>0) fuSh.getRange(r._rowIndex, typeCol).setValue("AUTO");
+        if(createdByCol>0) fuSh.getRange(r._rowIndex, createdByCol).setValue("AutoReschedule");
+
+        appendLog_({
+          "Timestamp": now,
+          "User": email,
+          "Party": String(r["Party"]||""),
+          "Source": "FollowUp",
+          "Action": "Auto-Rescheduled",
+          "Note": "Auto @19:30",
+          "FollowUp DateTime": target,
+          "DaysPromised": ""
+        });
+      }
+    });
+
+  // 2) Pending calls from Paste_Here with no log today -> create AUTO followup at target
+  (paste.rows||[])
+    .filter(r => String(r["Calling Person"]||"").trim().toLowerCase() === lower)
+    .forEach(r=>{
+      const party = String(r["Particulars"]||"").trim();
+      if(!party) return;
+
+      // No duplicates: if any unsettled FU exists already, do nothing
+      if (hasAnyUnsettledFU(party)) return;
+
+      // If already logged today, don't schedule
+      if (hasLogToday(party)) return;
+
+      appendFollowUp_({
+        "Caller Email": email,
+        "Party": party,
+        "Due DateTime": target,
+        "Status": "",
+        "Created At": now,
+        "Note": "Auto-scheduled @19:30",
+        "FU Type": "AUTO",
+        "Created By": "AutoSchedule"
+      });
+
+      appendLog_({
+        "Timestamp": now,
+        "User": email,
+        "Party": party,
+        "Source": "Paste_Here",
+        "Action": "Auto-Scheduled",
+        "Note": "Auto @19:30",
+        "FollowUp DateTime": target,
+        "DaysPromised": ""
+      });
+    });
+
+  return { ok:true, email, target: target.toISOString() };
+}
+
+// Force run for a user (button)
+function closeOutForUser_(email){
+  return scheduleForUser_(email);
+}
+
+/************** HTTP **************/
+function doGet(e){
+  try{
+    const action = e && e.parameter && e.parameter.action;
+    if(action === 'LOGS_LIST'){
+      return ContentService
+        .createTextOutput(JSON.stringify({ok:true, data:getLogsList_()}))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+  }catch(err){
+    return ContentService
+      .createTextOutput(JSON.stringify({ok:false, error:{message:String(err)}}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  return ContentService
+    .createTextOutput(JSON.stringify({ok:true, ping:true, ts: nowIST_()}))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doOptions(e){
+  return ContentService.createTextOutput('OK');
+}
+
+function doPost(e){
+  try{
+    const body = e.postData && e.postData.contents ? JSON.parse(e.postData.contents) : {};
+    const {action, idToken, payload} = body || {};
+    const user = verifyIdToken_(idToken);
+
+    let data;
+    if(action === 'getDashboard') data = getDashboard_(user.email);
+    else if(action === 'markAction') data = markAction_(user.email, payload);
+    else if(action === 'closeOutUser') data = closeOutForUser_(user.email);
+    else throw new Error('Unknown action');
+
+    return ContentService
+      .createTextOutput(JSON.stringify({ok:true, data}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }catch(err){
+    return ContentService
+      .createTextOutput(JSON.stringify({ok:false, error:String(err)}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+/************** TRIGGER **************/
+function createDailySchedulerTrigger(){
+  // Clean old triggers
+  ScriptApp.getProjectTriggers().forEach(t=>{
+    const fn = t.getHandlerFunction();
+    if (fn==='runDailyScheduleAll' || fn==='runDailySchedulerAll') ScriptApp.deleteTrigger(t);
+  });
+
+  // Create new at 19:30 IST daily
+  ScriptApp.newTrigger('runDailySchedulerAll')
+    .timeBased()
+    .atHour(CFG.TRIGGER_H)
+    .nearMinute(CFG.TRIGGER_M)
+    .everyDays(1)
+    .inTimezone(CFG.TZ)
+    .create();
+}
+
+function runDailySchedulerAll(){
+  // Collect unique users from Paste_Here and FollowUp
+  const users = new Set();
+
+  const paste = readTable_(getSheet_(CFG.SHEETS.PASTE));
+  (paste.rows||[]).forEach(r=>{
+    const u = String(r["Calling Person"]||"").trim().toLowerCase();
+    if(u) users.add(u);
+  });
+
+  const fuSh = getSheet_(CFG.SHEETS.FOLLOW);
+  ensureFollowupHeaders_();
+  const fu = readTable_(fuSh);
+  (fu.rows||[]).forEach(r=>{
+    const u = String(r["Caller Email"]||"").trim().toLowerCase();
+    if(u) users.add(u);
+  });
+
+  const list = [...users];
+  list.forEach(u=>{
+    try { scheduleForUser_(u); } catch(e) { /* ignore per-user */ }
+  });
+
+  return { ok:true, ranAt: nowIST_(), users: list.length };
+}

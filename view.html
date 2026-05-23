@@ -27,7 +27,7 @@
       <div class="panel-row">
         <div class="field">
           <label>Search</label>
-          <input id="q" class="input" placeholder="Party / Notes / Called By..." />
+          <input id="q" class="input" placeholder="Party / Remarks / Called By..." />
         </div>
 
         <div class="field">
@@ -104,8 +104,14 @@
               <th data-key="party" class="sortable">
                 Party <span class="sort-ind" aria-hidden="true"></span>
               </th>
+              <th data-key="source" class="sortable">
+                Source <span class="sort-ind" aria-hidden="true"></span>
+              </th>
+              <th data-key="action" class="sortable">
+                Action <span class="sort-ind" aria-hidden="true"></span>
+              </th>
               <th data-key="notes" class="sortable">
-                Notes <span class="sort-ind" aria-hidden="true"></span>
+                Remarks <span class="sort-ind" aria-hidden="true"></span>
               </th>
               <th data-key="nextFollowUpMs" class="sortable">
                 Next Follow Up <span class="sort-ind" aria-hidden="true"></span>
@@ -113,7 +119,7 @@
             </tr>
           </thead>
           <tbody id="tbody">
-            <tr><td colspan="5" class="empty">Loading…</td></tr>
+            <tr><td colspan="7" class="empty">Loading...</td></tr>
           </tbody>
         </table>
       </div>

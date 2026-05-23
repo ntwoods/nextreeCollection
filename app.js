@@ -62,7 +62,7 @@ function uniqSorted(arr){
 }
 
 function toCSV(rows){
-  const header = ["Called At","Called By","Party","Notes","Next Follow Up"];
+  const header = ["Called At","Called By","Party","Source","Action","Remarks","Next Follow Up"];
   const esc = (v) => {
     const s = (v ?? "").toString().replace(/\r?\n/g, " ");
     if(/[",]/.test(s)) return `"${s.replace(/"/g,'""')}"`;
@@ -74,6 +74,8 @@ function toCSV(rows){
       esc(r.calledAt || fmtDDMMYYHHMM(r.calledAtMs)),
       esc(r.calledBy),
       esc(r.party),
+      esc(r.source),
+      esc(r.action),
       esc(r.notes),
       esc(r.nextFollowUp || fmtDDMMYYHHMM(r.nextFollowUpMs)),
     ].join(","));
@@ -136,7 +138,7 @@ function applyFilters(){
 
     // search
     if(q){
-      const blob = `${r.calledBy||""} ${r.party||""} ${r.notes||""}`.toLowerCase();
+      const blob = `${r.calledBy||""} ${r.party||""} ${r.source||""} ${r.action||""} ${r.notes||""}`.toLowerCase();
       if(!blob.includes(q)) return false;
     }
 
@@ -198,7 +200,9 @@ function keyLabel(key){
     case "calledAtMs": return "Called At";
     case "calledBy": return "Called By";
     case "party": return "Party";
-    case "notes": return "Notes";
+    case "source": return "Source";
+    case "action": return "Action";
+    case "notes": return "Remarks";
     case "nextFollowUpMs": return "Next Follow Up";
     default: return key;
   }
@@ -209,7 +213,7 @@ function renderTable(){
   el("countBadge").textContent = `${VIEW.length} rows`;
 
   if(!VIEW.length){
-    tb.innerHTML = `<tr><td colspan="5" class="empty">No rows found. Try changing filters.</td></tr>`;
+    tb.innerHTML = `<tr><td colspan="7" class="empty">No rows found. Try changing filters.</td></tr>`;
     return;
   }
 
@@ -221,6 +225,8 @@ function renderTable(){
       <td>${escapeHtml(ca)}</td>
       <td>${escapeHtml(r.calledBy ?? "")}</td>
       <td>${escapeHtml(r.party ?? "")}</td>
+      <td>${escapeHtml(r.source ?? "")}</td>
+      <td>${escapeHtml(r.action ?? "")}</td>
       <td class="notes">${escapeHtml(notes)}</td>
       <td>${escapeHtml(fu)}</td>
     </tr>`;
@@ -338,7 +344,7 @@ function wireEvents(){
 async function boot(){
   try{
     setStatus("Loading data…");
-    el("tbody").innerHTML = `<tr><td colspan="5" class="empty">Loading…</td></tr>`;
+    el("tbody").innerHTML = `<tr><td colspan="7" class="empty">Loading…</td></tr>`;
     el("btnRefresh").disabled = true;
 
     RAW = await apiFetchLogs();
@@ -349,6 +355,8 @@ async function boot(){
       calledAt: r.calledAt || "",
       calledBy: r.calledBy || "",
       party: r.party || "",
+      source: r.source || "",
+      action: r.action || "",
       notes: r.notes || "",
       nextFollowUpMs: typeof r.nextFollowUpMs === "number" ? r.nextFollowUpMs : (r.nextFollowUpMs ? Number(r.nextFollowUpMs) : null),
       nextFollowUp: r.nextFollowUp || "",
@@ -365,7 +373,7 @@ async function boot(){
   }catch(err){
     console.error(err);
     setStatus(err.message || "Failed to load", "err");
-    el("tbody").innerHTML = `<tr><td colspan="5" class="empty">Error: ${escapeHtml(err.message || "Failed")}</td></tr>`;
+    el("tbody").innerHTML = `<tr><td colspan="7" class="empty">Error: ${escapeHtml(err.message || "Failed")}</td></tr>`;
   }finally{
     el("btnRefresh").disabled = false;
   }
